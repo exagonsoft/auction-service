@@ -1,0 +1,139 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - master
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    # Step 1: Connect to EC2 and prepare the environment
+    - name: Connect to EC2 for setup
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        timeout: 1200s
+        script: |
+            echo "Connected to EC2 for setup"
+
+            # Install Git if not already installed
+            if ! command -v git &> /dev/null
+            then
+                echo "Git not found. Installing..."
+                sudo yum install -y git  # Use `sudo apt-get install -y git` for Ubuntu
+            fi
+
+            # Ensure the repository directory exists, clone if not
+            if [ ! -d "auction-service" ]; then
+              echo "Directory does not exist. Cloning repository..."
+              # Use the GitHub SSH key to pull the latest code
+              echo "${{ secrets.TMS_GITHUB_SSHKEY }}" > ~/.ssh/github_id_rsa
+              chmod 600 ~/.ssh/github_id_rsa
+              eval $(ssh-agent)
+              ssh-add ~/.ssh/github_id_rsa
+              git clone git@github.com:aleph-engineering-gmbh/tickets_management_system.git
+            else
+              echo "Directory exists. No need to clone."
+            fi
+
+            # Navigate to the repository directory
+            cd tickets_management_system
+
+            # Use the GitHub SSH key to pull the latest code
+            echo "${{ secrets.TMS_GITHUB_SSHKEY }}" > ~/.ssh/github_id_rsa
+            chmod 600 ~/.ssh/github_id_rsa
+            eval $(ssh-agent)
+            ssh-add ~/.ssh/github_id_rsa
+
+            git fetch origin master
+            git reset --hard origin/master
+            echo "GitHub Repo Updated"
+
+            rm ~/.ssh/github_id_rsa
+            echo "Setup completed"
+
+    # Step 2: Connect to EC2 and run docker-compose
+    - name: Connect to EC2 for docker-compose
+      uses: appleboy/ssh-action@master
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        timeout: 1200s
+        script: |
+            echo "Connected to EC2 for docker-compose"
+
+            # Navigate to the repository directory
+            cd tickets_management_system
+
+            # Set Docker timeouts
+            export DOCKER_CLIENT_TIMEOUT=300
+            export COMPOSE_HTTP_TIMEOUT=300
+
+            sudo docker stop tickets_management_system-trudesk-1
+            sudo docker rm -v tickets_management_system-trudesk-1
+            sudo docker rmi tickets_management_system-trudesk
+
+            sudo docker-compose up -d
+
+            echo "Docker Compose started"
+
+  build-and-push-image:
+    runs-on: self-hosted
+
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Log in to the Container registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+      - name: "Extract node_modules.zip"
+        run: |
+          # Extract node_modules.zip if present
+            if [ -f "node_modules.zip" ]; then
+              echo "Extracting node-modules.zip..."
+              unzip -o node_modules.zip
+              echo "Extraction completed."
+            else
+              echo "node_modules.zip not found. Skipping extraction."
+            fi
+      - name: Build and push Docker image
+        id: push
+        uses: docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
