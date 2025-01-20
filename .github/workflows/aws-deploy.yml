@@ -48,10 +48,10 @@ jobs:
             if [ ! -d "auction-service" ]; then
               echo "Directory does not exist. Cloning repository..."
               # Use the GitHub SSH key to pull the latest code
-              echo "${{ secrets.TMS_GITHUB_SSHKEY }}" > ~/.ssh/github_id_rsa
-              chmod 600 ~/.ssh/github_id_rsa
+              echo "${{ secrets.TMS_GITHUB_SSHKEY }}" > ~/.ssh/tms_github_id_rsa
+              chmod 600 ~/.ssh/tms_github_id_rsa
               eval $(ssh-agent)
-              ssh-add ~/.ssh/github_id_rsa
+              ssh-add ~/.ssh/tms_github_id_rsa
               git clone https://github.com/exagonsoft/auction-service.git
             else
               echo "Directory exists. No need to clone."
@@ -61,16 +61,16 @@ jobs:
             cd auction-service
 
             # Use the GitHub SSH key to pull the latest code
-            echo "${{ secrets.TMS_GITHUB_SSHKEY }}" > ~/.ssh/github_id_rsa
-            chmod 600 ~/.ssh/github_id_rsa
+            echo "${{ secrets.TMS_GITHUB_SSHKEY }}" > ~/.ssh/tms_github_id_rsa
+            chmod 600 ~/.ssh/tms_github_id_rsa
             eval $(ssh-agent)
-            ssh-add ~/.ssh/github_id_rsa
+            ssh-add ~/.ssh/tms_github_id_rsa
 
             git fetch origin master
             git reset --hard origin/master
             echo "GitHub Repo Updated"
 
-            rm ~/.ssh/github_id_rsa
+            rm ~/.ssh/tms_github_id_rsa
             echo "Setup completed"
 
   deploy:
