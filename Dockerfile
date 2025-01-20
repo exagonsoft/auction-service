@@ -8,7 +8,7 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Install dependencies
-RUN npm install --production
+RUN npm install
 
 # Copy the rest of the application code
 COPY . .
@@ -20,4 +20,4 @@ RUN npm run build
 EXPOSE 4040
 
 # Command to run the application
-CMD ["npm", "run", "start"]
+CMD ["npm", "run", "start:dev"]

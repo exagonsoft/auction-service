@@ -60,6 +60,9 @@ export class AuctionGateway
         throw new UnauthorizedException('No token provided');
       }
 
+     console.log("THE TOKEN: ", token);
+      
+
       // Verify the token
       const payload = this.jwtService.verify(token, {
         secret: process.env.JWT_SECRET,

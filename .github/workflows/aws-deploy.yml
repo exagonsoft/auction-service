@@ -120,7 +120,6 @@ jobs:
 
             # Build and start the Docker container
             sudo docker-compose down
-            sudo docker-compose build
             sudo docker-compose up -d
 
             echo "Application deployed using Docker successfully"
