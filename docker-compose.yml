@@ -1,0 +1,15 @@
+services:
+  app:
+    container_name: auction-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4040:4040"
+    environment:
+      - MONGO_URI=${MONGO_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - APP_PORT=${APP_PORT}
+    volumes:
+      - .:/usr/src/app
+    restart: unless-stopped
