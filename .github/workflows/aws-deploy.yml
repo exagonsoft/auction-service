@@ -3,92 +3,100 @@ name: Deploy to EC2
 on:
   push:
     branches:
-      - master
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+      - main
 
 jobs:
-  deploy:
+  cleanup:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      - name: Connect to EC2 via SSH for Cleanup
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "Connected to EC2 for cleanup"
+            sudo apt update && sudo apt upgrade -y
+            curl -fsSL https://deb.nodesource.com/setup_current.x | sudo -E bash -
+            sudo apt install -y nodejs
+            echo "Disk cleanup complete"
 
-    # Step 1: Connect to EC2 and prepare the environment
-    - name: Connect to EC2 for setup
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USERNAME }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        timeout: 1200s
-        script: |
-          echo "Connected to EC2 for setup"
+  clone_repo:
+    runs-on: ubuntu-latest
+    needs: cleanup
 
-          # Install Git if not already installed
-          if ! command -v git &> /dev/null; then
-              echo "Git not found. Installing..."
-              sudo yum install -y git
-          fi
+    steps:
+      - name: Connect to EC2 via SSH to Clone Repo
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "Connected to EC2 for setup"
 
-          # Check if Node.js is installed
-          if ! command -v node &> /dev/null; then
-              echo "Node.js not found. Installing..."
-              curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
-              sudo yum install -y nodejs
-          fi
+            # Install Git if not already installed
+            if ! command -v git &> /dev/null
+            then
+                echo "Git not found. Installing..."
+                sudo yum install -y git  # Use `sudo apt-get install -y git` for Ubuntu
+            fi
 
-          # Verify Node.js and npm installation
-          node -v
-          npm -v
+            # Ensure the repository directory exists, clone if not
+            if [ ! -d "auction-service" ]; then
+              echo "Directory does not exist. Cloning repository..."
+              # Use the GitHub SSH key to pull the latest code
+              echo "${{ secrets.TMS_GITHUB_SSHKEY }}" > ~/.ssh/github_id_rsa
+              chmod 600 ~/.ssh/github_id_rsa
+              eval $(ssh-agent)
+              ssh-add ~/.ssh/github_id_rsa
+              git clone https://github.com/exagonsoft/auction-service.git
+            else
+              echo "Directory exists. No need to clone."
+            fi
 
-          # Configure SSH for GitHub
-          mkdir -p ~/.ssh
-          echo "${{ secrets.TMS_GITHUB_SSHKEY }}" > ~/.ssh/github_id_rsa
-          chmod 600 ~/.ssh/github_id_rsa
-          ssh-keyscan -t rsa github.com >> ~/.ssh/known_hosts
+            # Navigate to the repository directory
+            cd auction-service
 
-          # Ensure repository is up-to-date
-          if [ ! -d "auction-service" ]; then
-              echo "Cloning repository..."
-              git clone git@github.com:exagonsoft/auction-service.git
-          fi
+            # Use the GitHub SSH key to pull the latest code
+            echo "${{ secrets.TMS_GITHUB_SSHKEY }}" > ~/.ssh/github_id_rsa
+            chmod 600 ~/.ssh/github_id_rsa
+            eval $(ssh-agent)
+            ssh-add ~/.ssh/github_id_rsa
 
-          cd auction-service
-          git fetch origin master
-          git reset --hard origin/master
-          echo "Repository updated"
+            git fetch origin master
+            git reset --hard origin/master
+            echo "GitHub Repo Updated"
 
-          # Clean up SSH key
-          rm ~/.ssh/github_id_rsa
-          echo "Setup completed"
+            rm ~/.ssh/github_id_rsa
+            echo "Setup completed"
 
-    # Step 2: Connect to EC2 and run App
-    - name: Connect to EC2 for application start
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USERNAME }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        timeout: 1200s
-        script: |
-          echo "Connected to EC2 for application start"
+  deploy:
+    runs-on: ubuntu-latest
+    needs: clone_repo
 
-          # Navigate to the repository directory
-          cd auction-service
+    steps:
+      - name: Connect to EC2 via SSH to Deploy
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "Connected to EC2 for deployment"
 
-          # Ensure proper permissions
-          sudo chown -R $(whoami):$(whoami) .
+            cd auction-service
 
-          # Set Docker timeouts
-          export DOCKER_CLIENT_TIMEOUT=300
-          export COMPOSE_HTTP_TIMEOUT=300
+            rm .env
+            echo "MONGO_URI=${{ vars.MONGO_URI }}" >> .env
+            echo "JWT_SECRET=${{ vars.JWT_SECRET }}" >> .env
+            echo "APP_PORT=${{ vars.APP_PORT }}" >> .env
 
-          # Install dependencies and start the application
-          npm install
-          npm run start:dev
+            echo "Env file Created"
 
-          echo "Application started"
+            sudo npm install
+            sudo npm run start:dev
+
+            echo "CI/CD finished"
