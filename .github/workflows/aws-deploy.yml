@@ -17,19 +17,29 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            echo "Connected to EC2 for setup"
-
-            # Check if Node.js is already installed
-            if ! command -v node &> /dev/null; then
-                echo "Node.js not found. Installing..."
-                # Install Node.js using the NodeSource repository
-                curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
-                sudo yum install -y nodejs
+            # Check if Docker is already installed
+            if ! command -v docker &> /dev/null; then
+              echo "Docker not found. Installing..."
+              sudo yum update -y
+              sudo yum install -y docker
+              sudo service docker start
+              sudo usermod -a -G docker ec2-user
             else
-                echo "Node.js is already installed. Version: $(node -v)"
+              echo "Docker is already installed. Version: $(docker --version)"
             fi
 
-            echo "Node.js installation completed"
+            # Check if Docker Compose is installed
+            if ! command -v docker-compose &> /dev/null; then
+              echo "Docker Compose not found. Installing..."
+              sudo curl -L "https://github.com/docker/compose/releases/download/2.22.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+              sudo chmod +x /usr/local/bin/docker-compose
+              sudo ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose
+              echo "Docker Compose installed. Version: $(docker-compose --version)"
+            else
+              echo "Docker Compose is already installed. Version: $(docker-compose --version)"
+            fi
+
+            echo "Environment setup completed"
 
   clone_repo:
     runs-on: ubuntu-latest
@@ -94,6 +104,10 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             echo "Connected to EC2 for deployment"
+
+            echo "Installing required libraries..."
+            sudo yum update -y
+            sudo yum install -y libxcrypt-compat
 
             cd auction-service
 
