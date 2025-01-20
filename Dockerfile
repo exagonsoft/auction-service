@@ -20,4 +20,4 @@ RUN npm run build
 EXPOSE 4040
 
 # Command to run the application
-CMD ["npm", "run", "start:prod"]
+CMD ["npm", "run", "start"]

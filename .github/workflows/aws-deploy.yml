@@ -119,8 +119,8 @@ jobs:
             echo "Env file Created"
 
             # Build and start the Docker container
-            docker-compose down
-            docker-compose build
-            docker-compose up -d
+            sudo docker-compose down
+            sudo docker-compose build
+            sudo docker-compose up -d
 
             echo "Application deployed using Docker successfully"
