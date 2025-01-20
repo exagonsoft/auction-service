@@ -118,6 +118,9 @@ jobs:
 
             echo "Env file Created"
 
-            sudo npm install
+            # Build and start the Docker container
+            docker-compose down
+            docker-compose build
+            docker-compose up -d
 
-            echo "CI/CD finished Success"
+            echo "Application deployed using Docker successfully"
