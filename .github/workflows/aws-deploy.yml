@@ -17,11 +17,19 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            echo "Connected to EC2 for cleanup"
-            sudo apt update && sudo apt upgrade -y
-            curl -fsSL https://deb.nodesource.com/setup_current.x | sudo -E bash -
-            sudo apt install -y nodejs
-            echo "Node Installed"
+            echo "Connected to EC2 for setup"
+
+            # Check if Node.js is already installed
+            if ! command -v node &> /dev/null; then
+                echo "Node.js not found. Installing..."
+                # Install Node.js using the NodeSource repository
+                curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+                sudo yum install -y nodejs
+            else
+                echo "Node.js is already installed. Version: $(node -v)"
+            fi
+
+            echo "Node.js installation completed"
 
   clone_repo:
     runs-on: ubuntu-latest
