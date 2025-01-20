@@ -34,6 +34,17 @@ jobs:
               sudo yum install -y git
           fi
 
+          # Check if Node.js is installed
+          if ! command -v node &> /dev/null; then
+              echo "Node.js not found. Installing..."
+              curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash -
+              sudo yum install -y nodejs
+          fi
+
+          # Verify Node.js and npm installation
+          node -v
+          npm -v
+
           # Configure SSH for GitHub
           mkdir -p ~/.ssh
           echo "${{ secrets.TMS_GITHUB_SSHKEY }}" > ~/.ssh/github_id_rsa
