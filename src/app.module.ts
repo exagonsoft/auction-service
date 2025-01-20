@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { AuctionModule } from './auction/auction.module';
 import { ConfigModule } from '@nestjs/config';
+import { AppController } from './app.controller';
 
 @Module({
   imports: [
@@ -10,5 +11,6 @@ import { ConfigModule } from '@nestjs/config';
     MongooseModule.forRoot(process.env.MONGO_URI),
     AuctionModule,
   ],
+  controllers:[AppController]
 })
 export class AppModule {}
