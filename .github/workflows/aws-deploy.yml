@@ -99,4 +99,4 @@ jobs:
             sudo npm install
             sudo npm run start:dev
 
-            echo "CI/CD finished"
+            echo "CI/CD finished Success"
