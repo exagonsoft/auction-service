@@ -105,6 +105,5 @@ jobs:
             echo "Env file Created"
 
             sudo npm install
-            sudo npm start
 
             echo "CI/CD finished Success"
