@@ -8,10 +8,11 @@ import {
   ConnectedSocket,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  WebSocketServer,
 } from '@nestjs/websockets';
 import { AuctionService } from './auction.service';
 import { JwtService } from '@nestjs/jwt';
-import { Socket } from 'socket.io';
+import { Socket, Server } from 'socket.io';
 import { UnauthorizedException } from '@nestjs/common';
 import { auctionBid, StaticMedia } from 'src/types/customTypes';
 import { Client } from 'socket.io/dist/client';
@@ -26,9 +27,12 @@ import { Client } from 'socket.io/dist/client';
 export class AuctionGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {
+  @WebSocketServer()
+  server: Server;
   private bidsList: Array<auctionBid> = [];
   private currentBid: auctionBid;
   private currentMedia: { auctionId: string; media: StaticMedia };
+  private auctionRooms: Record<string, Set<string>> = {};
 
   constructor(
     private readonly auctionService: AuctionService,
@@ -60,8 +64,7 @@ export class AuctionGateway
         throw new UnauthorizedException('No token provided');
       }
 
-     console.log("THE TOKEN: ", token);
-      
+      console.log('THE TOKEN: ', token);
 
       // Verify the token
       const payload = this.jwtService.verify(token, {
@@ -79,7 +82,19 @@ export class AuctionGateway
   }
 
   handleDisconnect(client: Socket) {
-    console.log('Client disconnected:', client.id);
+    for (const [auctionId, clients] of Object.entries(this.auctionRooms)) {
+      if (clients.has(client.id)) {
+        clients.delete(client.id);
+        console.log(`Client ${client.id} left auction ${auctionId}`);
+        client
+          .to(auctionId)
+          .emit('userLeft', { username: client.id, auctionId });
+        if (clients.size === 0) {
+          delete this.auctionRooms[auctionId]; // Cleanup empty rooms
+        }
+        break;
+      }
+    }
   }
 
   // Auction Manager: Start Video Stream
@@ -175,13 +190,16 @@ export class AuctionGateway
     },
     @ConnectedSocket() client: Socket,
   ) {
-    console.log('INITIAL DATA REQUEST FROM: ', auctionId);
+    if (!this.auctionRooms[auctionId]) {
+      console.error(`No clients found in auction room ${auctionId}`);
+      return;
+    }
 
     const currentMedia = {
       type: this.currentMedia.media.type,
       url: this.currentMedia.media.url,
     };
-    client.to(auctionId).emit('initialData', {
+    this.server.to(auctionId).emit('initialData', {
       currentBid: this.currentBid,
       bidHistory: this.bidsList,
       currentMedia,
@@ -202,11 +220,15 @@ export class AuctionGateway
         throw new UnauthorizedException('You must be logged in to place a bid');
       }
 
+      if (!this.auctionRooms[auctionId]) {
+        console.error(`No clients found in auction room ${auctionId}`);
+        return;
+      }
+
       this.bidsList.push(bid);
       this.currentBid = bid;
-      console.log('THE BID DATA: ', { bid, auctionId });
 
-      client.to(auctionId).emit('bidUpdated', {
+      this.server.to(auctionId).emit('bidUpdated', {
         bidList: this.bidsList,
         currentBid: this.currentBid,
       });
@@ -222,30 +244,26 @@ export class AuctionGateway
     { auctionId, duration }: { auctionId: string; duration: number },
     @ConnectedSocket() client: Socket,
   ) {
-    const user = client.data.user;
-    if (user.role !== 'admin') {
-      throw new UnauthorizedException('Only admins can start the timer');
-    }
-
-    if (this.auctionTimers[auctionId]) {
-      clearTimeout(this.auctionTimers[auctionId]);
+    if (!this.auctionRooms[auctionId]) {
+      console.error(`No clients found in auction room ${auctionId}`);
+      return;
     }
 
     let remainingTime = duration;
+
     const interval = setInterval(() => {
       remainingTime -= 1;
-      client.to(auctionId).emit('timerUpdate', { remainingTime });
-      console.log(`TIME UPDATED TO: ${remainingTime}`);
+
+      // Emit to all clients in the room using `this.server`
+      this.server.to(auctionId).emit('timerUpdate', { remainingTime });
 
       if (remainingTime <= 0) {
         clearInterval(interval);
-        client.to(auctionId).emit('auctionEnded', { message: 'Auction ended' });
-        delete this.auctionTimers[auctionId];
+        this.server
+          .to(auctionId)
+          .emit('auctionEnded', { message: 'Auction ended' });
       }
     }, 1000);
-
-    this.auctionTimers[auctionId] = interval;
-    client.emit('timerStarted', { message: 'Timer started', duration });
   }
 
   // Auction Manager: Start Timer
@@ -277,17 +295,26 @@ export class AuctionGateway
   }
 
   @SubscribeMessage('joinAuction')
-  handleJoinAuction(
+  async handleJoinAuction(
     @MessageBody() { auctionId }: { auctionId: string },
     @ConnectedSocket() client: Socket,
   ) {
-    client.join(auctionId);
+    await client.join(auctionId);
+
+    if (!this.auctionRooms[auctionId]) {
+      this.auctionRooms[auctionId] = new Set();
+    }
+    this.auctionRooms[auctionId].add(client.id);
     console.log(`Client ${client.id} joined auction ${auctionId}`);
-    client
-      .to(auctionId)
-      .emit('auctionJoined', { username: client.id, auctionId });
+
+    // Notify the joining client
+    client.emit('auctionJoined', { username: client.id, auctionId });
+
+    // Optionally notify others in the room
+    client.to(auctionId).emit('userJoined', { username: client.id, auctionId });
+
     console.log(
-      `Welcome message emitted to chanel: ${auctionId} for client: ${client.id}`,
+      `Welcome message emitted to room: ${auctionId} for client: ${client.id}`,
     );
   }
 
