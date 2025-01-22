@@ -134,14 +134,7 @@ export class AuctionGateway
       .to(auctionId)
       .emit('streamStopped', { auctionId, message: 'Stream has been stopped' });
 
-    console.log(`Stream stopped for auction ${auctionId}`);
-
-    // Log and remove clients from the room
-    const roomClients = Array.from(client.rooms);
-    console.log(
-      `Clients in auction room (${auctionId}) before stop:`,
-      roomClients,
-    );
+      this.auctionRooms[auctionId].clear();
 
     client.leave(auctionId);
   }
@@ -331,7 +324,7 @@ export class AuctionGateway
     console.log(`Received offer from admin for auction: ${auctionId}`);
 
     // Forward the offer to all clients in the auction room except the sender
-    client.to(auctionId).emit('offer', { signalData });
+    this.server.to(auctionId).emit('offer', { signalData });
   }
 
   /**
@@ -347,6 +340,6 @@ export class AuctionGateway
     console.log(`Received answer from client for auction: ${auctionId}`);
 
     // Forward the answer to the auctioneer
-    client.to(auctionId).emit('answer', { signalData });
+    this.server.to(auctionId).emit('answer', { signalData });
   }
 }
