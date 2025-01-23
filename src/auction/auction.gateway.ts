@@ -88,7 +88,7 @@ export class AuctionGateway
         console.log(`Client ${client.id} left auction ${auctionId}`);
         client
           .to(auctionId)
-          .emit('userLeft', { username: client.id, auctionId });
+          .emit('userLeft', { clientId: client.id, auctionId });
         if (clients.size === 0) {
           delete this.auctionRooms[auctionId]; // Cleanup empty rooms
         }
@@ -134,7 +134,7 @@ export class AuctionGateway
       .to(auctionId)
       .emit('streamStopped', { auctionId, message: 'Stream has been stopped' });
 
-      this.auctionRooms[auctionId].clear();
+    this.auctionRooms[auctionId].clear();
 
     client.leave(auctionId);
   }
@@ -301,10 +301,10 @@ export class AuctionGateway
     console.log(`Client ${client.id} joined auction ${auctionId}`);
 
     // Notify the joining client
-    client.emit('auctionJoined', { username: client.id, auctionId });
+    this.server.emit('auctionJoined', { clientId: client.id, auctionId });
 
     // Optionally notify others in the room
-    client.to(auctionId).emit('userJoined', { username: client.id, auctionId });
+    this.server.to(auctionId).emit('userJoined', { clientId: client.id, auctionId });
 
     console.log(
       `Welcome message emitted to room: ${auctionId} for client: ${client.id}`,
@@ -317,29 +317,41 @@ export class AuctionGateway
   @SubscribeMessage('offer')
   handleOffer(
     @MessageBody()
-    data: { auctionId: string; signalData: RTCSessionDescriptionInit },
+    data: {
+      auctionId: string;
+      clientId: string;
+      signalData: RTCSessionDescriptionInit;
+    },
     @ConnectedSocket() client: Socket,
   ) {
-    const { auctionId, signalData } = data;
-    console.log(`Received offer from admin for auction: ${auctionId}`);
+    const { auctionId, clientId, signalData } = data;
+    console.log(
+      `Forwarding offer from auctioneer to client ${clientId} in auction ${auctionId}`,
+    );
 
-    // Forward the offer to all clients in the auction room except the sender
-    this.server.to(auctionId).emit('offer', { signalData });
+    // Forward the offer to the specific client
+    this.server.to(auctionId).to(clientId).emit('offer', { auctionId, clientId, signalData });
   }
 
   /**
-   * Handles WebRTC answer from the client.
+   * Handles WebRTC answer from the admin/auctioneer.
    */
   @SubscribeMessage('answer')
   handleAnswer(
     @MessageBody()
-    data: { auctionId: string; signalData: RTCSessionDescriptionInit },
+    data: {
+      auctionId: string;
+      clientId: string;
+      signalData: RTCSessionDescriptionInit;
+    },
     @ConnectedSocket() client: Socket,
   ) {
-    const { auctionId, signalData } = data;
-    console.log(`Received answer from client for auction: ${auctionId}`);
+    const { auctionId, clientId, signalData } = data;
+    console.log(
+      `Forwarding answer from client ${clientId} to auctioneer for auction ${auctionId}`,
+    );
 
     // Forward the answer to the auctioneer
-    this.server.to(auctionId).emit('answer', { signalData });
+    client.to(auctionId).emit('answer', { clientId, signalData });
   }
 }
