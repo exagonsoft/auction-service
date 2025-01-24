@@ -14,12 +14,12 @@ import { AuctionService } from './auction.service';
 import { JwtService } from '@nestjs/jwt';
 import { Socket, Server } from 'socket.io';
 import { UnauthorizedException } from '@nestjs/common';
-import { auctionBid, StaticMedia } from 'src/types/customTypes';
-import { Client } from 'socket.io/dist/client';
+import { auctionBid, AuctionLot, StaticMedia } from 'src/types/customTypes';
+import { allowedDomains } from 'src/settings/corsWhitelist';
 
 @WebSocketGateway({
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000', // Allow the frontend URL
+    origins: allowedDomains, // Allow the frontend URL
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -31,8 +31,10 @@ export class AuctionGateway
   server: Server;
   private bidsList: Array<auctionBid> = [];
   private currentBid: auctionBid;
+  private currentLot: { auctionId: string; lot: AuctionLot };
   private currentMedia: { auctionId: string; media: StaticMedia };
   private auctionRooms: Record<string, Set<string>> = {};
+  private auctionTimers: Record<string, NodeJS.Timeout> = {};
 
   constructor(
     private readonly auctionService: AuctionService,
@@ -48,13 +50,22 @@ export class AuctionGateway
       media: {
         id: 1,
         type: 'image',
-        url: '/media/camion-1.jpg',
+        url: '/media/no_media.png',
         description: 'Descripcion Camion 1',
       },
     };
+    this.currentLot = {
+      auctionId: '',
+      lot: {
+        id: '',
+        title: '',
+        description: '',
+        startPrice: 0,
+        increment: 0,
+        media: [],
+      },
+    };
   }
-
-  private auctionTimers: Record<string, NodeJS.Timeout> = {};
 
   async handleConnection(client: Socket) {
     try {
@@ -86,9 +97,19 @@ export class AuctionGateway
       if (clients.has(client.id)) {
         clients.delete(client.id);
         console.log(`Client ${client.id} left auction ${auctionId}`);
-        client
+        this.server
           .to(auctionId)
           .emit('userLeft', { clientId: client.id, auctionId });
+
+        const user = client.data.user;
+        if (user.role === 'admin') {
+          this.resetAuctionData();
+          // Notify all clients in the room
+          this.server.to(auctionId).emit('auctionStopped', {
+            auctionId,
+            message: 'Auction has been stopped',
+          });
+        }
         if (clients.size === 0) {
           delete this.auctionRooms[auctionId]; // Cleanup empty rooms
         }
@@ -99,23 +120,8 @@ export class AuctionGateway
 
   // Auction Manager: Start Video Stream
   @SubscribeMessage('startStream')
-  handleStartStream(
-    @MessageBody() { auctionId }: { auctionId: string },
-    @ConnectedSocket() client: Socket,
-  ) {
-    const user = client.data.user;
-    if (user.role !== 'admin') {
-      throw new UnauthorizedException('Only admins can start a stream');
-    }
-
-    client.join(auctionId);
-    client.emit('streamStarted', { auctionId, message: 'Stream started' });
-    console.log(`Stream started for auction ${auctionId}`);
-
-    // Notify all clients in the auction room that the stream is starting
-    client
-      .to(auctionId)
-      .emit('awaitingOffer', { message: 'Auctioneer is preparing the stream' });
+  async handleStartStream(client: any, payload: any) {
+    console.log('Start stream requested:', payload);
   }
 
   // Auction Manager: Stop Video Stream
@@ -135,6 +141,29 @@ export class AuctionGateway
       .emit('streamStopped', { auctionId, message: 'Stream has been stopped' });
 
     this.auctionRooms[auctionId].clear();
+
+    client.leave(auctionId);
+  }
+
+  // Auction Manager: Stop Video Stream
+  @SubscribeMessage('stopAuction')
+  handleStopAuction(
+    @MessageBody() { auctionId }: { auctionId: string },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const user = client.data.user;
+    if (user.role !== 'admin') {
+      throw new UnauthorizedException('Only admins can stop a auctions');
+    }
+
+    // Notify all clients in the room
+    this.server.to(auctionId).emit('auctionStopped', {
+      auctionId,
+      message: 'Auction has been stopped',
+    });
+
+    this.auctionRooms[auctionId].clear();
+    this.resetAuctionData();
 
     client.leave(auctionId);
   }
@@ -172,6 +201,35 @@ export class AuctionGateway
     client.to(auctionId).emit('mediaUpdated', { media }); // Send media to clients
   }
 
+  // Auction Manager: Send Images or Pre-recorded Videos
+  @SubscribeMessage('updateLot')
+  handleSendLot(
+    @MessageBody()
+    {
+      auctionId,
+      lot,
+    }: {
+      auctionId: string;
+      lot: AuctionLot;
+    },
+    @ConnectedSocket() client: Socket,
+  ) {
+    const user = client.data.user;
+    if (user.role !== 'admin') {
+      throw new UnauthorizedException('Only admins can change lots');
+    }
+    this.currentLot = { auctionId, lot };
+    this.bidsList = [];
+    this.currentBid = {
+      auctionId: '',
+      username: '',
+      bidAmount: 0,
+    };
+    this.currentMedia = { auctionId, media: lot.media[0] };
+    console.log(`Received Lot for auction ${auctionId}`);
+    this.server.to(auctionId).emit('lotUpdated', { lot }); // Send media to clients
+  }
+
   // Handle 'requestInitialData' event
   @SubscribeMessage('requestInitialData')
   handleGetInitialData(
@@ -188,15 +246,13 @@ export class AuctionGateway
       return;
     }
 
-    const currentMedia = {
-      type: this.currentMedia.media.type,
-      url: this.currentMedia.media.url,
-    };
+    const currentMedia = this.currentMedia.media;
     this.server.to(auctionId).emit('initialData', {
       currentBid: this.currentBid,
       bidHistory: this.bidsList,
       currentMedia,
       client: client.id,
+      lot: this.currentLot,
     }); // Send media to clients
   }
 
@@ -257,9 +313,12 @@ export class AuctionGateway
           .emit('auctionEnded', { message: 'Auction ended' });
       }
     }, 1000);
+
+    // Store the timer for reset or clearing
+    this.auctionTimers[auctionId] = interval;
   }
 
-  // Auction Manager: Start Timer
+  // Auction Manager: Reset Timer
   @SubscribeMessage('resetTimer')
   handleResetTimer(
     @MessageBody()
@@ -268,23 +327,39 @@ export class AuctionGateway
   ) {
     const user = client.data.user;
     if (user.role !== 'admin') {
-      throw new UnauthorizedException('Only admins can start the timer');
+      throw new UnauthorizedException('Only admins can reset the timer');
     }
 
     if (this.auctionTimers[auctionId]) {
-      clearTimeout(this.auctionTimers[auctionId]);
+      clearInterval(this.auctionTimers[auctionId]); // Clear the existing timer
     }
 
-    const interval = setInterval(() => {
-      client.to(auctionId).emit('timerUpdate', { remainingTime: 0 });
+    // Restart the timer with 15 seconds
+    let remainingTime = 15;
 
-      clearInterval(interval);
-      client.to(auctionId).emit('auctionEnded', { message: 'Auction ended' });
-      delete this.auctionTimers[auctionId];
+    const interval = setInterval(() => {
+      remainingTime -= 1;
+
+      // Emit the remaining time to clients
+      this.server.to(auctionId).emit('timerUpdate', { remainingTime });
+
+      if (remainingTime <= 0) {
+        clearInterval(interval);
+        this.server
+          .to(auctionId)
+          .emit('auctionEnded', { message: 'Auction ended' });
+        delete this.auctionTimers[auctionId];
+      }
     }, 1000);
 
+    // Save the new timer
     this.auctionTimers[auctionId] = interval;
-    client.emit('timerStarted', { message: 'Timer started', duration: 0 });
+
+    // Notify the admin that the timer has been reset
+    client.emit('timerReset', {
+      message: 'Timer reset to 15 seconds',
+      duration: 15,
+    });
   }
 
   @SubscribeMessage('joinAuction')
@@ -304,54 +379,41 @@ export class AuctionGateway
     this.server.emit('auctionJoined', { clientId: client.id, auctionId });
 
     // Optionally notify others in the room
-    this.server.to(auctionId).emit('userJoined', { clientId: client.id, auctionId });
+    this.server
+      .to(auctionId)
+      .emit('userJoined', { clientId: client.id, auctionId });
 
     console.log(
       `Welcome message emitted to room: ${auctionId} for client: ${client.id}`,
     );
   }
 
-  /**
-   * Handles WebRTC offer from the admin/auctioneer.
-   */
-  @SubscribeMessage('offer')
-  handleOffer(
-    @MessageBody()
-    data: {
-      auctionId: string;
-      clientId: string;
-      signalData: RTCSessionDescriptionInit;
-    },
-    @ConnectedSocket() client: Socket,
-  ) {
-    const { auctionId, clientId, signalData } = data;
-    console.log(
-      `Forwarding offer from auctioneer to client ${clientId} in auction ${auctionId}`,
-    );
+  private resetAuctionData = () => {
+    this.currentBid = {
+      auctionId: '',
+      username: '',
+      bidAmount: 0,
+    };
+    this.currentMedia = {
+      auctionId: 'auction123',
+      media: {
+        id: 1,
+        type: 'image',
+        url: '/media/no_media.png',
+        description: 'Descripcion Camion 1',
+      },
+    };
+    this.currentLot = {
+      auctionId: '',
+      lot: {
+        id: '',
+        title: '',
+        description: '',
+        startPrice: 0,
+        increment: 0,
+        media: [],
+      },
+    };
+  };
 
-    // Forward the offer to the specific client
-    this.server.to(auctionId).to(clientId).emit('offer', { auctionId, clientId, signalData });
-  }
-
-  /**
-   * Handles WebRTC answer from the admin/auctioneer.
-   */
-  @SubscribeMessage('answer')
-  handleAnswer(
-    @MessageBody()
-    data: {
-      auctionId: string;
-      clientId: string;
-      signalData: RTCSessionDescriptionInit;
-    },
-    @ConnectedSocket() client: Socket,
-  ) {
-    const { auctionId, clientId, signalData } = data;
-    console.log(
-      `Forwarding answer from client ${clientId} to auctioneer for auction ${auctionId}`,
-    );
-
-    // Forward the answer to the auctioneer
-    client.to(auctionId).emit('answer', { clientId, signalData });
-  }
 }
