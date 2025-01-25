@@ -50,7 +50,7 @@ export class AuctionGateway
       media: {
         id: 1,
         type: 'image',
-        url: '/media/no_media.png',
+        url: '/media/no_media.gif',
         description: 'Descripcion Camion 1',
       },
     };
@@ -399,7 +399,7 @@ export class AuctionGateway
       media: {
         id: 1,
         type: 'image',
-        url: '/media/no_media.png',
+        url: '/media/no_media.gif',
         description: 'Descripcion Camion 1',
       },
     };
