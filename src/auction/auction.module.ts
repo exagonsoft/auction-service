@@ -8,10 +8,12 @@ import { AuctionService } from './auction.service';
 import { Auction, AuctionSchema } from '../db/model/auction.schema';
 import { JwtStrategy } from './jwt.strategy';
 import { AuctionGateway } from './auction.gateway';
+import { Vehicle, VehicleSchema } from 'src/db/model/vehicle.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Auction.name, schema: AuctionSchema }]),
+    MongooseModule.forFeature([{ name: Vehicle.name, schema: VehicleSchema }]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
       secret: process.env.JWT_SECRET, // Shared secret for validation

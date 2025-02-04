@@ -14,7 +14,12 @@ import { AuctionService } from './auction.service';
 import { JwtService } from '@nestjs/jwt';
 import { Socket, Server } from 'socket.io';
 import { UnauthorizedException } from '@nestjs/common';
-import { auctionBid, AuctionLot, StaticMedia } from 'src/types/customTypes';
+import {
+  auctionBid,
+  Vehicle,
+  StaticMedia,
+  VehicleMedia,
+} from 'src/types/customTypes';
 import { allowedDomains } from 'src/settings/corsWhitelist';
 
 @WebSocketGateway({
@@ -31,8 +36,8 @@ export class AuctionGateway
   server: Server;
   private bidsList: Array<auctionBid> = [];
   private currentBid: auctionBid;
-  private currentLot: { auctionId: string; lot: AuctionLot };
-  private currentMedia: { auctionId: string; media: StaticMedia };
+  private currentLot: { auctionId: string; vehicle: Vehicle };
+  private currentMedia: { auctionId: string; media: VehicleMedia };
   private auctionRooms: Record<string, Set<string>> = {};
   private auctionTimers: Record<string, NodeJS.Timeout> = {};
 
@@ -48,21 +53,20 @@ export class AuctionGateway
     this.currentMedia = {
       auctionId: 'auction123',
       media: {
-        id: 1,
         type: 'image',
         url: '/media/no_media.gif',
-        description: 'Descripcion Camion 1',
       },
     };
     this.currentLot = {
       auctionId: '',
-      lot: {
-        id: '',
+      vehicle: {
+        _id: '',
         title: '',
-        description: '',
-        startPrice: 0,
-        increment: 0,
+        country: '',
+        price: 0,
         media: [],
+        available: false,
+        userId: '',
       },
     };
   }
@@ -207,10 +211,10 @@ export class AuctionGateway
     @MessageBody()
     {
       auctionId,
-      lot,
+      vehicle,
     }: {
       auctionId: string;
-      lot: AuctionLot;
+      vehicle: Vehicle;
     },
     @ConnectedSocket() client: Socket,
   ) {
@@ -218,16 +222,18 @@ export class AuctionGateway
     if (user.role !== 'admin') {
       throw new UnauthorizedException('Only admins can change lots');
     }
-    this.currentLot = { auctionId, lot };
+    console.log('THE RECEIVED DATA: ', vehicle);
+
+    this.currentLot = { auctionId, vehicle };
     this.bidsList = [];
     this.currentBid = {
       auctionId: '',
       username: '',
       bidAmount: 0,
     };
-    this.currentMedia = { auctionId, media: lot.media[0] };
+    this.currentMedia = { auctionId, media: vehicle.media[0] };
     console.log(`Received Lot for auction ${auctionId}`);
-    this.server.to(auctionId).emit('lotUpdated', { lot }); // Send media to clients
+    this.server.to(auctionId).emit('lotUpdated', vehicle ); // Send media to clients
   }
 
   // Handle 'requestInitialData' event
@@ -301,7 +307,7 @@ export class AuctionGateway
     let remainingTime = duration;
 
     const interval = setInterval(() => {
-      remainingTime -= 1;
+      if (remainingTime > 0) remainingTime -= 1;
 
       // Emit to all clients in the room using `this.server`
       this.server.to(auctionId).emit('timerUpdate', { remainingTime });
@@ -338,7 +344,7 @@ export class AuctionGateway
     let remainingTime = 15;
 
     const interval = setInterval(() => {
-      remainingTime -= 1;
+      if (remainingTime > 0) remainingTime -= 1;
 
       // Emit the remaining time to clients
       this.server.to(auctionId).emit('timerUpdate', { remainingTime });
@@ -397,23 +403,21 @@ export class AuctionGateway
     this.currentMedia = {
       auctionId: 'auction123',
       media: {
-        id: 1,
         type: 'image',
         url: '/media/no_media.gif',
-        description: 'Descripcion Camion 1',
       },
     };
     this.currentLot = {
       auctionId: '',
-      lot: {
-        id: '',
+      vehicle: {
+        _id: '',
         title: '',
-        description: '',
-        startPrice: 0,
-        increment: 0,
+        country: '',
+        price: 0,
+        userId: '',
         media: [],
+        available: false,
       },
     };
   };
-
 }
